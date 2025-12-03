@@ -1,0 +1,12 @@
+target/
+dist/
+.git/
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+.vscode/
+.idea/
+*.bak
+*.tmp

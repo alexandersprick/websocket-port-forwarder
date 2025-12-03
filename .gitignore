@@ -1,0 +1,15 @@
+target/
+dist/
+Cargo.lock
+*.pfx
+*.pem
+*.key
+*.crt
+*.csr
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml
