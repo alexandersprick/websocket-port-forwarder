@@ -6,8 +6,8 @@ COPY . .
 
 # Build standard Linux binary
 RUN cargo build --release && \
-    strip target/release/tunnel-server && \
-    strip target/release/tunnel-client
+    strip target/release/ws-forwarder-server && \
+    strip target/release/ws-forwarder-client
 
 # Stage 2: Build Windows binary
 FROM rust:1-trixie AS windows-builder
@@ -25,5 +25,5 @@ COPY . .
 
 # Build Windows binary
 RUN cargo build --release --target x86_64-pc-windows-gnu && \
-    strip target/x86_64-pc-windows-gnu/release/tunnel-server.exe && \
-    strip target/x86_64-pc-windows-gnu/release/tunnel-client.exe
+    strip target/x86_64-pc-windows-gnu/release/ws-forwarder-server.exe && \
+    strip target/x86_64-pc-windows-gnu/release/ws-forwarder-client.exe

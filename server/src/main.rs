@@ -17,8 +17,9 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{error, info, warn};
 
 #[derive(Parser)]
-#[command(name = "tunnel-server")]
+#[command(name = "ws-forwarder-server")]
 #[command(about = "Reverse tunnel server over WebSocket", long_about = None)]
+#[command(version)]
 struct Args {
     /// WebSocket server bind address
     #[arg(short, long, default_value = "0.0.0.0:8443")]
@@ -200,7 +201,7 @@ where
                 info!("Client {} closed connection", client_id);
                 break;
             }
-            Ok(WsMessage::Ping(data)) => {
+            Ok(WsMessage::Ping(_data)) => {
                 // Pong is automatically sent by tungstenite
                 continue;
             }
