@@ -1,5 +1,5 @@
 # Stage 1: Build Linux binary (dynamic linking is fine)
-FROM rust:1.83-bookworm AS linux-builder
+FROM rust:1-trixie AS linux-builder
 
 WORKDIR /workspace
 COPY . .
@@ -10,7 +10,7 @@ RUN cargo build --release && \
     strip target/release/tunnel-client
 
 # Stage 2: Build Windows binary
-FROM rust:1.83-bookworm AS windows-builder
+FROM rust:1-trixie AS windows-builder
 
 # Install mingw cross-compiler
 RUN apt-get update && apt-get install -y \

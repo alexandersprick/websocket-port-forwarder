@@ -33,7 +33,7 @@ echo "File sizes:"
 ls -lh dist/linux/
 ls -lh dist/windows/
 
-echo ""
-echo "Verify Linux static linking:"
-file dist/linux/tunnel-server
-ldd dist/linux/tunnel-server 2>&1 || echo "(static binary - no dynamic dependencies)"
+#echo ""
+#echo "Verify Linux static linking:"
+#file dist/linux/tunnel-server
+#ldd dist/linux/tunnel-server 2>&1 || echo "(static binary - no dynamic dependencies)"
