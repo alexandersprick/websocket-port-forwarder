@@ -18,3 +18,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+serde = { workspace = true }
+toml = "0.8"

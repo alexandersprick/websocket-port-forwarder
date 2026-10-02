@@ -13,6 +13,9 @@ use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{error, info, warn};
 
+#[cfg(windows)]
+mod winservice;
+
 #[derive(Parser)]
 #[command(name = "ws-forwarder-client")]
 #[command(about = "Reverse tunnel client over WebSocket", long_about = None)]
@@ -20,7 +23,7 @@ use tracing::{error, info, warn};
 struct Args {
     /// Server WebSocket URL (wss://host:port)
     #[arg(short, long)]
-    server: String,
+    server: Option<String>,
 
     /// Port forwarding rules: local_port:remote_port
     /// Example: 8080:9000 (forward local 8080 to server's public port 9000)
@@ -38,6 +41,34 @@ struct Args {
     /// Suppress all output
     #[arg(short, long, default_value = "false")]
     quiet: bool,
+
+    /// Install as a Windows service. Optional value: path to the TOML config file
+    /// (default: ws-forwarder-client.toml next to the executable)
+    #[cfg(windows)]
+    #[arg(
+        long,
+        value_name = "CONFIG",
+        num_args = 0..=1,
+        conflicts_with_all = ["uninstall_service", "service"]
+    )]
+    install_service: Option<Option<std::path::PathBuf>>,
+
+    /// Uninstall the Windows service
+    #[cfg(windows)]
+    #[arg(long, conflicts_with = "service")]
+    uninstall_service: bool,
+
+    /// Run as a Windows service with the given config file (used by the service manager)
+    #[cfg(windows)]
+    #[arg(long, hide = true, value_name = "CONFIG")]
+    service: Option<std::path::PathBuf>,
+}
+
+struct Settings {
+    server: String,
+    forward: Vec<String>,
+    insecure: bool,
+    retry_interval: u64,
 }
 
 type TunnelId = u32;
@@ -92,21 +123,44 @@ fn parse_forward_rules(rules: &[String]) -> Result<Vec<ForwardRule>> {
     Ok(forward_rules)
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
+
+    #[cfg(windows)]
+    {
+        if let Some(config) = args.install_service {
+            return winservice::install(config);
+        }
+        if args.uninstall_service {
+            return winservice::uninstall();
+        }
+        if let Some(config) = args.service {
+            return winservice::run(&config);
+        }
+    }
 
     if !args.quiet {
         tracing_subscriber::fmt::init();
     }
 
-    let forward_rules = parse_forward_rules(&args.forward)?;
+    let settings = Settings {
+        server: args.server.context("--server is required")?,
+        forward: args.forward,
+        insecure: args.insecure,
+        retry_interval: args.retry_interval,
+    };
+
+    tokio::runtime::Runtime::new()?.block_on(run_client(&settings))
+}
+
+async fn run_client(settings: &Settings) -> Result<()> {
+    let forward_rules = parse_forward_rules(&settings.forward)?;
 
     let state = Arc::new(ClientState::new(forward_rules));
-    let retry_interval = Duration::from_secs(args.retry_interval);
+    let retry_interval = Duration::from_secs(settings.retry_interval);
 
     // Connect to server with TLS
-    let tls_connector = if args.insecure {
+    let tls_connector = if settings.insecure {
         TlsConnector::builder()
             .danger_accept_invalid_certs(true)
             .danger_accept_invalid_hostnames(true)
@@ -116,10 +170,10 @@ async fn main() -> Result<()> {
     };
 
     loop {
-        info!("Connecting to {}", args.server);
+        info!("Connecting to {}", settings.server);
         
         let ws_stream = match connect_async_tls_with_config(
-            &args.server,
+            &settings.server,
             None,
             false,
             Some(tokio_tungstenite::Connector::NativeTls(tls_connector.clone())),
@@ -132,7 +186,7 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 error!("Failed to connect to server: {}", e);
-                info!("Retrying in {} seconds...", args.retry_interval);
+                info!("Retrying in {} seconds...", settings.retry_interval);
                 tokio::time::sleep(retry_interval).await;
                 continue;
             }
@@ -158,7 +212,7 @@ async fn main() -> Result<()> {
 
         if registration_failed {
             error!("Registration failed, reconnecting...");
-            info!("Retrying in {} seconds...", args.retry_interval);
+            info!("Retrying in {} seconds...", settings.retry_interval);
             tokio::time::sleep(retry_interval).await;
             continue;
         }
@@ -221,7 +275,7 @@ async fn main() -> Result<()> {
         }
 
         if connection_interrupted {
-            info!("Connection interrupted, retrying in {} seconds...", args.retry_interval);
+            info!("Connection interrupted, retrying in {} seconds...", settings.retry_interval);
             tokio::time::sleep(retry_interval).await;
         } else {
             info!("Client shutting down");

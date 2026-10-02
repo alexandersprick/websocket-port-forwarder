@@ -113,6 +113,35 @@ Now:
 - Traffic to `my-server.com:9000` → forwarded to `localhost:8080`
 - Traffic to `my-server.com:3001` → forwarded to `localhost:3000`
 
+### Running as a Windows Service
+
+On Windows, the client can be installed as a service. When running as a service, the settings are read from a TOML config file instead of command line arguments.
+
+Example `ws-forwarder-client.toml`:
+
+```toml
+server = "wss://example.com:8443"
+forward = ["8080:9000", "3000:3001"]
+insecure = false          # optional, default: false
+retry_interval = 60       # optional, default: 60 (seconds)
+log_file = "client.log"   # optional, relative to the config file; no logging if omitted
+```
+
+Install (from an elevated prompt), optionally passing the config file path (default: `ws-forwarder-client.toml` next to the executable):
+
+```bat
+ws-forwarder-client.exe --install-service C:\ws-forwarder\client.toml
+sc start ws-forwarder-client
+```
+
+Uninstall (stops the service if running):
+
+```bat
+ws-forwarder-client.exe --uninstall-service
+```
+
+The service is registered with automatic startup. Do not move the executable or config file after installing; reinstall if the paths change.
+
 ### Testing with Self-Signed Certificates
 
 For testing, you can use the `--insecure` flag to skip certificate validation:
