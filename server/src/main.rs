@@ -3,6 +3,7 @@ use clap::Parser;
 use common::Message;
 use futures_util::{SinkExt, StreamExt};
 use native_tls::{Identity, TlsAcceptor};
+use openssl::provider::Provider;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -50,6 +51,7 @@ struct ServerState {
     next_client_id: RwLock<ClientId>,
     next_tunnel_id: RwLock<TunnelId>,
     tunnel_senders: RwLock<HashMap<TunnelId, mpsc::UnboundedSender<Vec<u8>>>>,
+    tunnel_clients: RwLock<HashMap<TunnelId, ClientId>>,
 }
 
 impl ServerState {
@@ -60,6 +62,7 @@ impl ServerState {
             next_client_id: RwLock::new(0),
             next_tunnel_id: RwLock::new(0),
             tunnel_senders: RwLock::new(HashMap::new()),
+            tunnel_clients: RwLock::new(HashMap::new()),
         }
     }
 
@@ -76,6 +79,47 @@ impl ServerState {
         *id += 1;
         current
     }
+
+    async fn register_tunnel(
+        &self,
+        tunnel_id: TunnelId,
+        client_id: ClientId,
+        sender: mpsc::UnboundedSender<Vec<u8>>,
+    ) {
+        {
+            let mut senders = self.tunnel_senders.write().await;
+            senders.insert(tunnel_id, sender);
+        }
+        {
+            let mut tunnel_clients = self.tunnel_clients.write().await;
+            tunnel_clients.insert(tunnel_id, client_id);
+        }
+    }
+
+    async fn unregister_tunnel(&self, tunnel_id: TunnelId) {
+        {
+            let mut senders = self.tunnel_senders.write().await;
+            senders.remove(&tunnel_id);
+        }
+        {
+            let mut tunnel_clients = self.tunnel_clients.write().await;
+            tunnel_clients.remove(&tunnel_id);
+        }
+    }
+
+    async fn cleanup_tunnels_for_client(&self, client_id: ClientId) {
+        let tunnel_ids: Vec<_> = {
+            let tunnel_clients = self.tunnel_clients.read().await;
+            tunnel_clients
+                .iter()
+                .filter_map(|(tunnel_id, owner)| (*owner == client_id).then_some(*tunnel_id))
+                .collect()
+        };
+
+        for tunnel_id in tunnel_ids {
+            self.unregister_tunnel(tunnel_id).await;
+        }
+    }
 }
 
 #[tokio::main]
@@ -86,6 +130,11 @@ async fn main() -> Result<()> {
     
     // Load TLS certificate if provided
     let tls_acceptor = if let Some(cert_path) = &args.cert {
+        // Older PKCS12 files (e.g. from OpenSSL 1.1.1) use ciphers OpenSSL 3 moved behind the legacy provider
+        let _legacy_provider = Provider::try_load(None, "legacy", true)
+            .inspect_err(|e| warn!("Failed to load OpenSSL legacy provider: {}", e))
+            .ok();
+
         let mut file = File::open(cert_path)
             .context("Failed to open certificate file")?;
         let mut identity_data = vec![];
@@ -284,9 +333,7 @@ async fn handle_client_message(
         Message::TunnelOpenAck { tunnel_id, success, error } => {
             if !success {
                 warn!("Client {} failed to open tunnel {}: {:?}", client_id, tunnel_id, error);
-                // Close the tunnel sender
-                let mut senders = state.tunnel_senders.write().await;
-                senders.remove(&tunnel_id);
+                state.unregister_tunnel(tunnel_id).await;
             }
         }
         Message::TunnelData { tunnel_id, data } => {
@@ -298,8 +345,7 @@ async fn handle_client_message(
         }
         Message::TunnelClose { tunnel_id } => {
             info!("Client {} closed tunnel {}", client_id, tunnel_id);
-            let mut senders = state.tunnel_senders.write().await;
-            senders.remove(&tunnel_id);
+            state.unregister_tunnel(tunnel_id).await;
         }
         Message::Ping => {
             // Respond with Pong for keepalive
@@ -358,11 +404,7 @@ async fn handle_tunnel(
     
     // Create channel for receiving data from client
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
-    
-    {
-        let mut senders = state.tunnel_senders.write().await;
-        senders.insert(tunnel_id, tx);
-    }
+    state.register_tunnel(tunnel_id, client_id, tx).await;
 
     // Request client to open tunnel
     {
@@ -422,10 +464,7 @@ async fn handle_tunnel(
     read_task.abort();
     
     // Cleanup
-    {
-        let mut senders = state.tunnel_senders.write().await;
-        senders.remove(&tunnel_id);
-    }
+    state.unregister_tunnel(tunnel_id).await;
 
     info!("Tunnel {} closed", tunnel_id);
 
@@ -444,6 +483,8 @@ async fn cleanup_client(client_id: ClientId, state: &Arc<ServerState>) {
             (Vec::new(), Vec::new())
         }
     };
+
+    state.cleanup_tunnels_for_client(client_id).await;
 
     // Stop all listener tasks
     for task in listener_tasks {

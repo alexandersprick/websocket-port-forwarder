@@ -61,6 +61,37 @@ impl ClientState {
     }
 }
 
+fn parse_forward_rules(rules: &[String]) -> Result<Vec<ForwardRule>> {
+    let mut forward_rules = Vec::with_capacity(rules.len());
+
+    for rule in rules {
+        let (local_port, remote_port) = rule
+            .split_once(':')
+            .with_context(|| format!("Invalid forward rule: {}. Use format local_port:remote_port", rule))?;
+
+        let local_port = local_port
+            .parse::<u16>()
+            .with_context(|| format!("Invalid local port in rule: {}", rule))?;
+        let remote_port = remote_port
+            .parse::<u16>()
+            .with_context(|| format!("Invalid remote port in rule: {}", rule))?;
+
+        forward_rules.push(ForwardRule {
+            local_port,
+            remote_port,
+        });
+        info!("Forward rule: local {} -> remote {}", local_port, remote_port);
+    }
+
+    if forward_rules.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No forwarding rules specified. Use --forward local:remote"
+        ));
+    }
+
+    Ok(forward_rules)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -69,25 +100,7 @@ async fn main() -> Result<()> {
         tracing_subscriber::fmt::init();
     }
 
-    // Parse forwarding rules
-    let mut forward_rules = Vec::new();
-    for rule in &args.forward {
-        let parts: Vec<&str> = rule.split(':').collect();
-        if parts.len() != 2 {
-            return Err(anyhow::anyhow!("Invalid forward rule: {}. Use format local_port:remote_port", rule));
-        }
-        let local_port = parts[0].parse::<u16>()
-            .context(format!("Invalid local port in rule: {}", rule))?;
-        let remote_port = parts[1].parse::<u16>()
-            .context(format!("Invalid remote port in rule: {}", rule))?;
-        
-        forward_rules.push(ForwardRule { local_port, remote_port });
-        info!("Forward rule: local {} -> remote {}", local_port, remote_port);
-    }
-
-    if forward_rules.is_empty() {
-        return Err(anyhow::anyhow!("No forwarding rules specified. Use --forward local:remote"));
-    }
+    let forward_rules = parse_forward_rules(&args.forward)?;
 
     let state = Arc::new(ClientState::new(forward_rules));
     let retry_interval = Duration::from_secs(args.retry_interval);

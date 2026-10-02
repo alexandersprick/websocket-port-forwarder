@@ -33,7 +33,7 @@ The project consists of three components:
 
 ### Building from Source
 
-Requires Rust 1.70 or later.
+Requires Rust 1.88 or later.
 
 ```bash
 cargo build --release
@@ -162,6 +162,8 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 # Convert to PKCS12 format
 openssl pkcs12 -export -out server.pfx -inkey key.pem -in cert.pem -password pass:mypassword
 ```
+
+The `-p/--password` passed to the server must match the password used here, or parsing fails with a `mac verify failure` error.
 
 ## License
 
